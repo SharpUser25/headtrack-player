@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  core-linux:
+    name: HeadTrackCore (Linux, swift test)
+    runs-on: ubuntu-latest
+    container: swift:6.0
+    steps:
+      - uses: actions/checkout@v4
+      - run: swift test --package-path HeadTrackCore
+
+  macos:
+    name: macOS build and test
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Show toolchain
+        run: |
+          sw_vers
+          xcodebuild -version
+          swift --version
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate project
+        run: xcodegen generate
+      - name: HeadTrackCore tests (swift test on macOS)
+        run: swift test --package-path HeadTrackCore
+      - name: Build app
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -project HeadTrackPlayer.xcodeproj \
+            -scheme HeadTrackPlayer \
+            -configuration Debug \
+            -destination 'platform=macOS' \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            | tee build.log
+      - name: Test
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -project HeadTrackPlayer.xcodeproj \
+            -scheme HeadTrackPlayer \
+            -configuration Debug \
+            -destination 'platform=macOS' \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            | tee test.log
+      - name: Measurements printed by tests
+        if: always()
+        run: grep -E "Bypass path|HRTF, left|L/R balance" test.log || true
+      - name: Warnings
+        if: always()
+        run: grep -E "warning:" build.log | sort -u | head -100 || true
