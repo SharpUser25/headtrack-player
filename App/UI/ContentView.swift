@@ -53,9 +53,10 @@ struct ContentView: View {
                 .disabled(model.status.fileName == nil)
 
                 Slider(value: $model.scrubPosition,
-                       in: 0...max(model.status.durationSeconds, 0.001)) { editing in
-                    if editing { model.isScrubbing = true } else { model.commitSeek() }
-                }
+                       in: 0...max(model.status.durationSeconds, 0.001),
+                       onEditingChanged: { editing in
+                           if editing { model.isScrubbing = true } else { model.commitSeek() }
+                       })
                 .disabled(model.status.fileName == nil)
 
                 Text("\(timeText(model.scrubPosition)) / \(timeText(model.status.durationSeconds))")
@@ -106,7 +107,7 @@ struct ContentView: View {
                 if model.settings.trackingEnabled {
                     Label(model.faceLost ? "No face" : "Face",
                           systemImage: model.faceLost ? "person.fill.questionmark" : "person.fill.checkmark")
-                        .foregroundStyle(model.faceLost ? .orange : .green)
+                        .foregroundStyle(model.faceLost ? Color.orange : Color.green)
                 }
             }
             HStack(spacing: 16) {

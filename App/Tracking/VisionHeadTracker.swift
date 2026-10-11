@@ -91,9 +91,10 @@ final class VisionHeadTracker: NSObject, HeadTracker, AVCaptureVideoDataOutputSa
         guard let device = Self.builtInCamera() else {
             throw TrackerError(errorDescription: "No built-in camera found.")
         }
-        guard let (format, range) = Self.bestFormat(for: device) else {
+        guard let best = Self.bestFormat(for: device) else {
             throw TrackerError(errorDescription: "The camera has no 1280x720 format.")
         }
+        let (format, range) = best
 
         session.beginConfiguration()
         defer { session.commitConfiguration() }
