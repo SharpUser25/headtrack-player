@@ -1,6 +1,7 @@
 import AVFoundation
 import CoreMedia
 import HeadTrackCore
+import OSLog
 import Vision
 
 /// Built-in camera at 1280x720 (highest frame rate available at that size)
@@ -15,7 +16,13 @@ final class VisionHeadTracker: NSObject, HeadTracker, AVCaptureVideoDataOutputSa
     private let captureQueue = DispatchQueue(label: "HeadTrackPlayer.capture.frames", qos: .userInteractive)
     private let visionQueue = DispatchQueue(label: "HeadTrackPlayer.vision", qos: .userInteractive)
     private let output = AVCaptureVideoDataOutput()
+    private let log = Logger(subsystem: "local.headtrack.HeadTrackPlayer", category: "camera")
+
+    // Touched only on sessionQueue.
     private var configured = false
+    private var device: AVCaptureDevice?
+    private var wantedFormat: AVCaptureDevice.Format?
+    private var wantedFrameDuration = CMTime.invalid
 
     // Guarded by busyLock.
     private var busy = false
@@ -24,6 +31,9 @@ final class VisionHeadTracker: NSObject, HeadTracker, AVCaptureVideoDataOutputSa
     private var meter = RateMeter(window: 1.0)
     private var dropped = 0
     private var lastStatsTime: Double = 0
+    private var lastBufferSize: (width: Int, height: Int)?
+    private var firstFrameTime: Double?
+    private var loggedEffectiveRate = false
 
     static let width: Int32 = 1280
     static let height: Int32 = 720
@@ -59,8 +69,54 @@ final class VisionHeadTracker: NSObject, HeadTracker, AVCaptureVideoDataOutputSa
                     return
                 }
             }
-            if !self.session.isRunning { self.session.startRunning() }
+            guard !self.session.isRunning else { return }
+            self.startRunningWithLockedFormat()
         }
+    }
+
+    /// Apple's macOS recipe for keeping a chosen format: lock the device, set
+    /// activeFormat and the frame durations, call startRunning, and only then
+    /// unlock. If the device is unlocked before startRunning, the session can
+    /// reconfigure the format on its own.
+    private func startRunningWithLockedFormat() {
+        resetFrameLogging()
+        let frameDuration = wantedFrameDuration
+        guard let device, let format = wantedFormat else {
+            session.startRunning()
+            return
+        }
+        do {
+            try device.lockForConfiguration()
+        } catch {
+            log.error("lockForConfiguration failed: \(error.localizedDescription, privacy: .public); starting with the session's own format")
+            session.startRunning()
+            return
+        }
+        device.activeFormat = format
+        device.activeVideoMinFrameDuration = frameDuration
+        device.activeVideoMaxFrameDuration = frameDuration
+        session.startRunning()
+        device.unlockForConfiguration()
+        log.notice("Requested \(Self.describe(format), privacy: .public) at \(Self.fps(frameDuration), format: .fixed(precision: 2)) fps; after startRunning activeFormat is \(Self.describe(device.activeFormat), privacy: .public), frame duration min \(Self.fps(device.activeVideoMinFrameDuration), format: .fixed(precision: 2)) fps / max \(Self.fps(device.activeVideoMaxFrameDuration), format: .fixed(precision: 2)) fps")
+    }
+
+    private func resetFrameLogging() {
+        visionQueue.async { [weak self] in
+            self?.lastBufferSize = nil
+            self?.firstFrameTime = nil
+            self?.loggedEffectiveRate = false
+        }
+    }
+
+    static func describe(_ format: AVCaptureDevice.Format) -> String {
+        let d = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
+        let maxRate = format.videoSupportedFrameRateRanges.map(\.maxFrameRate).max() ?? 0
+        return "\(d.width)x\(d.height) (up to \(String(format: "%.2f", maxRate)) fps)"
+    }
+
+    static func fps(_ duration: CMTime) -> Double {
+        let s = duration.seconds
+        return s.isFinite && s > 0 ? 1 / s : 0
     }
 
     private struct TrackerError: LocalizedError {
@@ -95,6 +151,9 @@ final class VisionHeadTracker: NSObject, HeadTracker, AVCaptureVideoDataOutputSa
             throw TrackerError(errorDescription: "The camera has no 1280x720 format.")
         }
         let (format, range) = best
+        self.device = device
+        wantedFormat = format
+        wantedFrameDuration = range.minFrameDuration
 
         session.beginConfiguration()
         defer { session.commitConfiguration() }
@@ -114,14 +173,7 @@ final class VisionHeadTracker: NSObject, HeadTracker, AVCaptureVideoDataOutputSa
             throw TrackerError(errorDescription: "Cannot add the video output.")
         }
         session.addOutput(output)
-
-        // Set the format after adding the input; the session otherwise
-        // applies its preset and overrides activeFormat.
-        try device.lockForConfiguration()
-        device.activeFormat = format
-        device.activeVideoMinFrameDuration = range.minFrameDuration
-        device.activeVideoMaxFrameDuration = range.minFrameDuration
-        device.unlockForConfiguration()
+        // activeFormat is applied in startRunningWithLockedFormat().
     }
 
     // MARK: Frames
@@ -142,9 +194,10 @@ final class VisionHeadTracker: NSObject, HeadTracker, AVCaptureVideoDataOutputSa
             return
         }
         let timestamp = CMSampleBufferGetPresentationTimeStamp(sampleBuffer).seconds
+        let device = (connection.inputPorts.first?.input as? AVCaptureDeviceInput)?.device
         // The pixel buffer is retained by the closure until Vision is done.
         visionQueue.async { [weak self] in
-            self?.analyze(pixelBuffer, timestamp: timestamp)
+            self?.analyze(pixelBuffer, timestamp: timestamp, device: device)
             self?.setIdle()
         }
     }
@@ -155,7 +208,7 @@ final class VisionHeadTracker: NSObject, HeadTracker, AVCaptureVideoDataOutputSa
         busyLock.unlock()
     }
 
-    private func analyze(_ pixelBuffer: CVPixelBuffer, timestamp: Double) {
+    private func analyze(_ pixelBuffer: CVPixelBuffer, timestamp: Double, device: AVCaptureDevice?) {
         let request = VNDetectFaceRectanglesRequest()
         // Revision 3 reports continuous yaw/pitch/roll; earlier revisions
         // quantize yaw and do not report pitch.
@@ -185,6 +238,7 @@ final class VisionHeadTracker: NSObject, HeadTracker, AVCaptureVideoDataOutputSa
         onSample?(HeadPoseSample(timestamp: timestamp, pose: pose))
 
         meter.record(at: t1, duration: t1 - t0)
+        logFormatInEffect(pixelBuffer, device: device, now: t1)
         if t1 - lastStatsTime >= 0.5 {
             lastStatsTime = t1
             busyLock.lock()
@@ -192,7 +246,24 @@ final class VisionHeadTracker: NSObject, HeadTracker, AVCaptureVideoDataOutputSa
             busyLock.unlock()
             onStats?(TrackerStats(framesPerSecond: meter.rate(now: t1),
                                   processingMilliseconds: meter.meanDuration.map { $0 * 1000 },
-                                  droppedFrames: d))
+                                  droppedFrames: d,
+                                  frameWidth: lastBufferSize?.width,
+                                  frameHeight: lastBufferSize?.height))
         }
+    }
+
+    /// Logs what the camera is really delivering: the buffer size whenever
+    /// it changes, and once, after two seconds of frames, the measured rate
+    /// alongside the device's active format and frame durations.
+    private func logFormatInEffect(_ pixelBuffer: CVPixelBuffer, device: AVCaptureDevice?, now: Double) {
+        let size = (width: CVPixelBufferGetWidth(pixelBuffer), height: CVPixelBufferGetHeight(pixelBuffer))
+        if lastBufferSize == nil || lastBufferSize! != size {
+            lastBufferSize = size
+            log.notice("Frames arriving at \(size.width)x\(size.height)")
+        }
+        if firstFrameTime == nil { firstFrameTime = now }
+        guard !loggedEffectiveRate, let first = firstFrameTime, now - first >= 2, let device else { return }
+        loggedEffectiveRate = true
+        log.notice("In effect: buffers \(size.width)x\(size.height), activeFormat \(Self.describe(device.activeFormat), privacy: .public), active frame duration \(Self.fps(device.activeVideoMinFrameDuration), format: .fixed(precision: 2)) fps, measured \(self.meter.rate(now: now), format: .fixed(precision: 1)) fps analysed")
     }
 }

@@ -54,6 +54,11 @@ Use wired headphones, with **Spatial** on and **Tracking** off.
 
 ### If the image lags or wobbles
 
+- The **Tracker** line shows the frame size actually arriving, for example `1280×720 · 30.0 fps`. For details, run this in Terminal:
+  ```sh
+  log stream --level info --predicate 'subsystem == "local.headtrack.HeadTrackPlayer" AND category == "camera"'
+  ```
+  It prints the format the app requested and the `activeFormat` after `startRunning`. Once frames arrive, it prints the buffer size, and after 2 s the active frame duration and measured rate. If the size isn't 1280x720 or the rate is lower than requested, the session overrode the format.
 - Look at **Tracker fps** and **Vision ms/frame**. You want close to 30 fps, and Vision time well under 33 ms. If fps is low, give the camera more light: in dim rooms macOS lowers the frame rate to lengthen exposure.
 - Lower **Smoothing**. Smoothing sets the One Euro minimum cutoff, which the slider shows in Hz. Lower smoothing means less lag and more jitter. Try going down until the image starts to shimmer while you hold still, then back off a little.
 - The 100 Hz interpolation ramps toward each new camera pose over one frame interval, about 33 ms. That buys smoothness at the cost of up to one frame of extra lag.

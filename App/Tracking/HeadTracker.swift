@@ -8,6 +8,9 @@ struct TrackerStats {
     var processingMilliseconds: Double?
     /// Frames dropped because the previous one was still being analysed.
     var droppedFrames: Int = 0
+    /// Size of the pixel buffers actually arriving from the camera.
+    var frameWidth: Int?
+    var frameHeight: Int?
 }
 
 /// Anything that can report head orientation. Swap in a different

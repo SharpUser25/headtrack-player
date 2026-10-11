@@ -111,7 +111,7 @@ struct ContentView: View {
                 }
             }
             HStack(spacing: 16) {
-                LabeledContent("Tracker", value: String(format: "%.1f fps", model.trackerStats.framesPerSecond))
+                LabeledContent("Tracker", value: trackerText(model.trackerStats))
                 LabeledContent("Vision", value: model.trackerStats.processingMilliseconds
                     .map { String(format: "%.1f ms/frame", $0) } ?? "—")
             }
@@ -148,6 +148,12 @@ struct ContentView: View {
                 .font(.caption2.monospacedDigit())
                 .foregroundStyle(.secondary)
         }
+    }
+
+    private func trackerText(_ s: TrackerStats) -> String {
+        let fps = String(format: "%.1f fps", s.framesPerSecond)
+        guard let w = s.frameWidth, let h = s.frameHeight else { return fps }
+        return "\(w)×\(h) · \(fps)"
     }
 
     private func rateText(_ hz: Double?) -> String {
