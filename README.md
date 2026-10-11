@@ -65,7 +65,9 @@ Use wired headphones, with **Spatial** on and **Tracking** off.
 - Nothing is resampled on purpose. Players are connected with mono and stereo formats at the **file's** rate, and the environment node outputs at the **device** rate. Any conversion happens only where those two rates differ.
 - Gains along the path are exactly 1.0, except for the master **Volume**, the A/B trim, and the HRTF itself. Mono files go to both speakers at unity, with no pan law. Files with more than two channels use the first two.
 - Reverb is off (`reverbParameters.enable = false`, `reverbBlend = 0`). Distance attenuation uses the inverse model with `referenceDistance = 2 m`, so the speakers at 2 m play at unity gain.
-- The plain-stereo bypass is checked in CI: rendered output must match the file within 1e-6.
+- The plain-stereo bypass is checked in CI: rendered output must match the file within 1e-6. The measured maximum difference was 4.9e-7 (about −126 dBFS), so the path is not bit-exact but is far below audibility.
+- CI also measures the HRTF render. A 1 kHz tone from the left speaker at −30° came out at −1.0 dB in the left ear and −9.2 dB in the right ear, relative to the input. That's why the A/B trim usually needs to be only about 1 dB.
+- Audio-side yaw convention, also measured in CI: setting `listenerAngularOrientation.yaw` to +60 moves the left speaker further left (L/R balance +9.1 dB), and −60 swings it to the right (−8.7 dB). Positive listener yaw therefore means the head turned **right**. The Vision sign is the part you still set by ear (checklist step 4).
 - Pause stops all players and resumes from the same frame on one shared start time, so the left, right and bypass players can never drift apart.
 
 ## Code layout
