@@ -1,0 +1,72 @@
+name: HeadTrackPlayer
+options:
+  bundleIdPrefix: local.headtrack
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MACOSX_DEPLOYMENT_TARGET: "14.0"
+packages:
+  HeadTrackCore:
+    path: HeadTrackCore
+targets:
+  HeadTrackPlayer:
+    type: application
+    platform: macOS
+    sources:
+      - path: App
+    dependencies:
+      - package: HeadTrackCore
+      - sdk: Carbon.framework
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleDisplayName: HeadTrack Player
+        CFBundleShortVersionString: "0.1.0"
+        CFBundleVersion: "1"
+        LSMinimumSystemVersion: "14.0"
+        LSApplicationCategoryType: public.app-category.music
+        NSCameraUsageDescription: HeadTrack Player uses the camera to track your head so the virtual speakers stay fixed in the room. Frames are analysed on this Mac and never stored or sent anywhere.
+    entitlements:
+      path: App/HeadTrackPlayer.entitlements
+      properties:
+        com.apple.security.app-sandbox: false
+        com.apple.security.device.camera: true
+    settings:
+      base:
+        PRODUCT_NAME: HeadTrack Player
+        PRODUCT_BUNDLE_IDENTIFIER: local.headtrack.HeadTrackPlayer
+        PRODUCT_MODULE_NAME: HeadTrackPlayer
+        ENABLE_HARDENED_RUNTIME: YES
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: ""
+        GENERATE_INFOPLIST_FILE: NO
+        SWIFT_STRICT_CONCURRENCY: minimal
+  HeadTrackPlayerTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: AppTests
+      - path: App/Audio
+    dependencies:
+      - package: HeadTrackCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: local.headtrack.HeadTrackPlayerTests
+        GENERATE_INFOPLIST_FILE: YES
+        SWIFT_STRICT_CONCURRENCY: minimal
+schemes:
+  HeadTrackPlayer:
+    build:
+      targets:
+        HeadTrackPlayer: all
+        HeadTrackPlayerTests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      gatherCoverageData: false
+      targets:
+        - HeadTrackPlayerTests
